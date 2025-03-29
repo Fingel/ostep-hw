@@ -1,4 +1,3 @@
-use semaphore::Semaphore;
 use std::sync::atomic::{AtomicU32, Ordering};
 #[allow(unused)]
 use std::{
@@ -16,8 +15,33 @@ use std::{
     thread::{self, Thread},
 };
 use std::{thread::sleep, time::Duration};
+pub struct Semaphore {
+    mutex: Mutex<u32>,
+    cond: Condvar,
+}
 
-mod semaphore;
+impl Semaphore {
+    pub fn new(value: u32) -> Self {
+        Semaphore {
+            cond: Condvar::new(),
+            mutex: Mutex::new(value),
+        }
+    }
+
+    pub fn wait(&self) {
+        let mut guard = self.mutex.lock().unwrap();
+        while *guard == 0 {
+            guard = self.cond.wait(guard).unwrap();
+        }
+        *guard -= 1;
+    }
+
+    pub fn post(&self) {
+        let mut guard = self.mutex.lock().unwrap();
+        *guard += 1;
+        self.cond.notify_one();
+    }
+}
 
 fn child(semaphore: Arc<Semaphore>) {
     println!("Child process started");
