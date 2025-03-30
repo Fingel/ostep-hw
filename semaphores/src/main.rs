@@ -15,6 +15,7 @@ use std::{
     thread::{self, Thread},
 };
 use std::{
+    env::args,
     sync::atomic::{AtomicU32, Ordering},
     thread::JoinHandle,
 };
@@ -22,49 +23,39 @@ use std::{thread::sleep, time::Duration};
 
 mod semaphore;
 
-// All children should post process started before ending
-//
-
-struct Barrier {
-    started: Arc<Semaphore>,
-    proceed: Arc<Semaphore>,
-    waiters: Arc<Mutex<Vec<JoinHandle<()>>>>,
-}
-
-fn child(started: Arc<Semaphore>, proceed: Arc<Semaphore>) {
-    println!("Child process started");
-    started.post();
-    proceed.wait();
-    println!("Child process ended");
-}
 fn main() {
-    let barrier = Barrier {
-        started: Arc::new(Semaphore::new(0)),
-        proceed: Arc::new(Semaphore::new(0)),
-        waiters: Arc::new(Mutex::new(Vec::new())),
-    };
+    let num_readers = args().nth(1).unwrap().parse().unwrap();
+    let num_writers = args().nth(2).unwrap().parse().unwrap();
+    let mut handles = Vec::new();
 
-    for _ in 0..5 {
-        let started_sem = barrier.started.clone();
-        let proceed_sem = barrier.proceed.clone();
-        let handle = std::thread::spawn(move || child(started_sem, proceed_sem));
-        barrier.waiters.lock().unwrap().push(handle);
-    }
+    let value = Arc::new(RwLock::new(0));
 
-    // Wait for all children to signal they've started
-    for _ in 0..5 {
-        barrier.started.wait();
+    println!(
+        "Starting with {} readers and {} writers",
+        num_readers, num_writers
+    );
+    for _ in 0..num_readers {
+        let value = value.clone();
+        handles.push(thread::spawn(move || {
+            let r = value.read().unwrap();
+            println!("Reader: Start");
+            sleep(Duration::from_secs(1));
+            println!("Reader: Value: {}", r);
+            println!("Reader: End");
+        }));
     }
-
-    // Allow all children to proceed
-    for _ in 0..5 {
-        barrier.proceed.post();
+    for _ in 0..num_writers {
+        let value = value.clone();
+        handles.push(thread::spawn(move || {
+            let mut w = value.write().unwrap();
+            println!("Writer: Start");
+            sleep(Duration::from_secs(1));
+            *w += 1;
+            println!("Writer: End value {}", *w);
+        }));
     }
-    // Take ownership of the vector of handles to join them
-    let handles = std::mem::take(&mut *barrier.waiters.lock().unwrap());
     for handle in handles {
         handle.join().unwrap();
     }
-
-    println!("Parent: End");
+    println!("Main: End");
 }
