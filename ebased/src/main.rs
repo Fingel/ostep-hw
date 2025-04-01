@@ -5,6 +5,7 @@ use nix::sys::socket::{
 };
 use nix::unistd::write;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::time::SystemTime;
 fn main() -> std::io::Result<()> {
     let num_sockets = 10;
     let server_addr = SockaddrIn::new(127, 0, 0, 1, 8080);
@@ -30,23 +31,25 @@ fn main() -> std::io::Result<()> {
     for sock in &sockets {
         fd_set.insert(sock.as_fd());
     }
+    let mut counter = 0;
     loop {
         // Create a copy of fd_set for select() as it modifies the set
-        let mut read_fds = fd_set.clone();
+        let mut read_set = fd_set;
 
         // Call select with timeout
         match nix::sys::select::select(
             None,
-            &mut read_fds,
+            &mut read_set,
             None,
             None,
             &mut nix::sys::time::TimeVal::new(5, 0),
         ) {
             Ok(num_ready) if num_ready > 0 => {
+                dbg!(num_ready);
                 // Process ready file descriptors
                 for sock_fd in &sockets {
                     // Check if this socket is ready
-                    if read_fds.contains(sock_fd.as_fd()) {
+                    if read_set.contains(sock_fd.as_fd()) {
                         // Handle the connection
                         match socket::accept(sock_fd.as_raw_fd()) {
                             Ok(raw_client_fd) => {
@@ -56,10 +59,8 @@ fn main() -> std::io::Result<()> {
 
                                 // For simplicity, we'll close it right away
                                 // In a real app, you'd spawn a thread or handle async
-                                let msg = format!(
-                                    "Hello, client! you are socket {}",
-                                    client_fd.as_raw_fd()
-                                );
+                                let now = SystemTime::now();
+                                let msg = format!("Hello, client! It's {:?} o'clock\n", now);
                                 write(client_fd, msg.as_bytes()).unwrap();
                                 // let _ = nix::unistd::close(client_fd);
                             }
@@ -76,5 +77,7 @@ fn main() -> std::io::Result<()> {
                 eprintln!("Error in select: {}", e);
             }
         }
+        counter += 1;
+        println!("Total loops: {}", counter);
     }
 }
