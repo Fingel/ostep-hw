@@ -1,12 +1,15 @@
+use nix::errno::Errno;
 use nix::fcntl::{OFlag, open};
+use nix::sys::aio::{Aio, AioRead};
 use nix::sys::select::FdSet;
+use nix::sys::signal::SigevNotify;
 use nix::sys::socket::{
     self, AddressFamily, Backlog, SockFlag, SockType, SockaddrIn, bind, listen, setsockopt, socket,
     sockopt::{ReuseAddr, ReusePort},
 };
 use nix::sys::stat::Mode;
 use nix::unistd::{read, write};
-use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::path::Path;
 fn main() -> std::io::Result<()> {
     let num_sockets = 10;
@@ -70,10 +73,25 @@ fn main() -> std::io::Result<()> {
 
                                 let file_fd = open(path, OFlag::O_RDONLY, Mode::empty()).unwrap();
                                 let mut file_content = [0; 1024];
-                                let bytes_read =
-                                    read(file_fd.as_raw_fd(), &mut file_content).unwrap();
-                                let file_content =
-                                    String::from_utf8_lossy(&file_content[..bytes_read]);
+                                let length: usize;
+                                {
+                                    let file_fd_borrowed =
+                                        unsafe { BorrowedFd::borrow_raw(file_fd) };
+                                    let mut aior = Box::pin(AioRead::new(
+                                        file_fd_borrowed,
+                                        0,
+                                        &mut file_content,
+                                        0,
+                                        SigevNotify::SigevNone,
+                                    ));
+                                    aior.as_mut().submit().unwrap();
+                                    while aior.as_mut().error() == Err(Errno::EINPROGRESS) {
+                                        std::thread::sleep(std::time::Duration::from_millis(10));
+                                    }
+                                    length = aior.as_mut().aio_return().unwrap();
+                                }
+
+                                let file_content = String::from_utf8_lossy(&file_content[..length]);
                                 write(client_fd, file_content.as_bytes()).unwrap();
                             }
                             Err(e) => eprintln!("Error accepting connection: {}", e),
