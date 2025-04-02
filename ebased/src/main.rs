@@ -1,6 +1,6 @@
 use nix::errno::Errno;
 use nix::fcntl::{OFlag, open};
-use nix::sys::aio::{Aio, AioRead};
+use nix::sys::aio::{Aio, AioRead, aio_suspend};
 use nix::sys::select::FdSet;
 use nix::sys::signal::SigevNotify;
 use nix::sys::socket::{
@@ -85,9 +85,7 @@ fn main() -> std::io::Result<()> {
                                         SigevNotify::SigevNone,
                                     ));
                                     aior.as_mut().submit().unwrap();
-                                    while aior.as_mut().error() == Err(Errno::EINPROGRESS) {
-                                        std::thread::sleep(std::time::Duration::from_millis(10));
-                                    }
+                                    aio_suspend(&[&*aior], None).unwrap();
                                     length = aior.as_mut().aio_return().unwrap();
                                 }
 
