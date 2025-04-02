@@ -1,11 +1,13 @@
+use nix::fcntl::{OFlag, open};
 use nix::sys::select::FdSet;
 use nix::sys::socket::{
     self, AddressFamily, Backlog, SockFlag, SockType, SockaddrIn, bind, listen, setsockopt, socket,
     sockopt::{ReuseAddr, ReusePort},
 };
-use nix::unistd::write;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
-use std::time::SystemTime;
+use nix::sys::stat::Mode;
+use nix::unistd::{read, write};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+use std::path::Path;
 fn main() -> std::io::Result<()> {
     let num_sockets = 10;
     let server_addr = SockaddrIn::new(127, 0, 0, 1, 8080);
@@ -57,12 +59,22 @@ fn main() -> std::io::Result<()> {
                                 // Handle client connection
                                 println!("Accepted connection on socket {}", sock_fd.as_raw_fd());
 
-                                // For simplicity, we'll close it right away
-                                // In a real app, you'd spawn a thread or handle async
-                                let now = SystemTime::now();
-                                let msg = format!("Hello, client! It's {:?} o'clock\n", now);
-                                write(client_fd, msg.as_bytes()).unwrap();
-                                // let _ = nix::unistd::close(client_fd);
+                                // Read the contents of the socket
+                                let mut buffer = [0; 1024];
+                                let bytes_read = read(client_fd.as_raw_fd(), &mut buffer).unwrap();
+                                let filename = String::from_utf8_lossy(&buffer[..bytes_read]);
+                                println!("Received filename: {}", filename);
+                                let p_what = filename.to_string();
+                                let path = Path::new(&p_what);
+                                println!("{}", path.exists());
+
+                                let file_fd = open(path, OFlag::O_RDONLY, Mode::empty()).unwrap();
+                                let mut file_content = [0; 1024];
+                                let bytes_read =
+                                    read(file_fd.as_raw_fd(), &mut file_content).unwrap();
+                                let file_content =
+                                    String::from_utf8_lossy(&file_content[..bytes_read]);
+                                write(client_fd, file_content.as_bytes()).unwrap();
                             }
                             Err(e) => eprintln!("Error accepting connection: {}", e),
                         }
