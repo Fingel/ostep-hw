@@ -12,15 +12,23 @@ fn main() {
         .unwrap();
     let p = args().nth(2).expect("Usage: tail <number> <file>");
     let path = Path::new(&p);
-    let mut found_newlines = 0;
     let fd = open(path, OFlag::O_RDONLY, Mode::S_IRUSR).unwrap();
-    let mut offset = -1;
+    let mut offset = -64;
     let mut buf: [u8; 4096] = [0; 4096];
-    while found_newlines < n + 1 {
+    let mut found_newlines = 0;
+    while found_newlines <= n {
         lseek(fd, offset, nix::unistd::Whence::SeekEnd).unwrap();
         read(fd, &mut buf).unwrap();
         found_newlines = buf.iter().filter(|&b| *b == b'\n').count() as u32;
-        offset -= 1;
+        offset -= 64;
     }
-    println!("{}", String::from_utf8_lossy(&buf));
+    // Get the index of the first newline we are interested in.
+    let index = buf
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| **b == b'\n')
+        .nth((found_newlines - n - 1) as usize)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    println!("{}", String::from_utf8_lossy(&buf[index..]));
 }
