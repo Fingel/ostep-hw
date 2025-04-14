@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::net::UdpSocket;
@@ -34,6 +35,13 @@ impl Server {
     fn run(&self) {
         let socket = UdpSocket::bind((self.addr, self.port)).unwrap();
         println!("Server running on {}:{}", self.addr, self.port);
+        let resp = self.get_message(&socket).unwrap();
+        println!("Received response: {:?}", resp);
+        println!("Received response: {:?}", resp.len());
+    }
+    fn get_message(&self, socket: &UdpSocket) -> Result<Vec<u8>, io::Error> {
+        let mut msg = Vec::new();
+        let mut msg_lengths: HashMap<u8, usize> = HashMap::new();
         loop {
             let mut buf = [0; 1024];
             match socket.recv_from(&mut buf) {
@@ -44,10 +52,14 @@ impl Server {
                         amt, addr, buf[0], buf[1]
                     );
                     socket.send_to("ack".as_bytes(), addr).unwrap();
+                    msg.extend_from_slice(&buf[2..]);
+                    *msg_lengths.entry(buf[0]).or_insert(0) += 1;
+                    if *msg_lengths.get(&buf[0]).unwrap() == buf[1] as usize {
+                        println!("Found all packets for id {}", buf[0]);
+                        return Ok(msg);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                }
+                Err(e) => return Err(e),
             }
         }
     }
@@ -74,13 +86,12 @@ impl Client {
             socket.local_addr().unwrap().port()
         );
         let msg = [0u8; MAX_PACKET_SIZE * 3];
+        let total_chunks = msg.len().div_ceil(MAX_PACKET_SIZE);
+        println!("Total chunks: {}", total_chunks);
         if msg.len() > MAX_PACKET_SIZE {
-            msg.chunks(MAX_PACKET_SIZE)
-                .enumerate()
-                .for_each(|(i, chunk)| {
-                    println!("Chunk {} sent", i);
-                    self.send(&socket, chunk, 1, i as u8).unwrap();
-                });
+            msg.chunks(MAX_PACKET_SIZE).for_each(|chunk| {
+                self.send(&socket, chunk, 1, total_chunks as u8).unwrap();
+            });
         }
     }
 
@@ -94,7 +105,6 @@ impl Client {
                 .collect::<Vec<u8>>();
             match self.send_with_ack(socket, &packet) {
                 Ok(_) => {
-                    println!("Sent data");
                     return Ok(());
                 }
                 Err(e) => match e.kind() {
